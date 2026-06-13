@@ -531,6 +531,71 @@ body {
   filter: brightness(1.05);
 }
 
+.modal__botao--instalar {
+  background: linear-gradient(135deg, var(--verde), var(--verde-escuro));
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(22, 163, 74, 0.35);
+}
+
+.modal__botao--instalar:hover {
+  filter: brightness(1.05);
+}
+
+/* Modal do PWA */
+.modal__app-icone {
+  border-radius: 16px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
+}
+
+.pwa-passos {
+  list-style: none;
+  counter-reset: passo;
+  margin: 0 0 1.3rem;
+  padding: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pwa-passos li {
+  counter-increment: passo;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.92rem;
+  color: var(--tinta);
+}
+
+.pwa-passos li::before {
+  content: counter(passo);
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--verde-claro);
+  color: var(--verde-escuro);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.pwa-passos__icone {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 6px;
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
+.modal__acoes--unica {
+  grid-template-columns: 1fr;
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;

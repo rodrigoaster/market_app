@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import './App.css'
 import { emojiParaProduto } from './emoji'
 import { useAnimatedNumber } from './useAnimatedNumber'
+import { usePwaInstall } from './usePwaInstall'
 
 type Product = {
   id: string
@@ -20,6 +21,9 @@ function App() {
   const [produtos, setProdutos] = useState<Product[]>([])
   const [saindo, setSaindo] = useState<Set<string>>(new Set())
   const [confirmandoLimpar, setConfirmandoLimpar] = useState(false)
+  const [mostrarPwa, setMostrarPwa] = useState(false)
+
+  const pwa = usePwaInstall()
 
   const [nome, setNome] = useState('')
   const [valor, setValor] = useState('')
@@ -43,6 +47,36 @@ function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [confirmandoLimpar])
+
+  // Convida a instalar o PWA: só fora do app instalado, se instalável (Android)
+  // ou no iOS (instruções manuais), e se ainda não foi dispensado.
+  useEffect(() => {
+    if (pwa.standalone || pwa.jaDispensou()) return
+    if (!pwa.podeInstalar && !pwa.isIOS) return
+    const t = window.setTimeout(() => setMostrarPwa(true), 2500)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pwa.standalone, pwa.podeInstalar, pwa.isIOS])
+
+  function fecharPwa() {
+    pwa.dispensar()
+    setMostrarPwa(false)
+  }
+
+  useEffect(() => {
+    if (!mostrarPwa) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') fecharPwa()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mostrarPwa])
+
+  async function instalarPwa() {
+    await pwa.instalar()
+    fecharPwa()
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -284,6 +318,84 @@ function App() {
                 Limpar tudo
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {mostrarPwa && (
+        <div
+          className="modal-overlay"
+          onClick={fecharPwa}
+          role="presentation"
+        >
+          <div
+            className="modal modal--pwa"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pwa-titulo"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              className="modal__app-icone"
+              src="/icons/icon-192.png"
+              alt=""
+              width={64}
+              height={64}
+            />
+            <h2 id="pwa-titulo" className="modal__titulo">
+              Instale a Minha Feira
+            </h2>
+            <p className="modal__texto">
+              Adicione à tela inicial e use como um aplicativo: abre em tela
+              cheia, mais rápido e funciona offline.
+            </p>
+
+            {pwa.podeInstalar ? (
+              <div className="modal__acoes">
+                <button
+                  type="button"
+                  className="modal__botao modal__botao--cancelar"
+                  onClick={fecharPwa}
+                >
+                  Agora não
+                </button>
+                <button
+                  type="button"
+                  className="modal__botao modal__botao--instalar"
+                  onClick={instalarPwa}
+                >
+                  📲 Instalar
+                </button>
+              </div>
+            ) : (
+              <>
+                <ol className="pwa-passos">
+                  <li>
+                    Toque em <strong>Compartilhar</strong>
+                    <span className="pwa-passos__icone" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="16" height="16">
+                        <path
+                          fill="currentColor"
+                          d="M12 2l4 4-1.4 1.4L13 5.8V15h-2V5.8L9.4 7.4 8 6l4-4zm-7 9h4v2H7v7h10v-7h-2v-2h4v11H5V11z"
+                        />
+                      </svg>
+                    </span>
+                  </li>
+                  <li>
+                    Escolha <strong>“Adicionar à Tela de Início”</strong>
+                  </li>
+                </ol>
+                <div className="modal__acoes modal__acoes--unica">
+                  <button
+                    type="button"
+                    className="modal__botao modal__botao--cancelar"
+                    onClick={fecharPwa}
+                  >
+                    Entendi
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
