@@ -1,42 +1,117 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { CATALOGO, normalizar } from './catalogo'
 import { emojiParaProduto } from './emoji'
+import { ItemProduto } from './ItemProduto'
 import { useAnimatedNumber } from './useAnimatedNumber'
+import { usePersistedState } from './usePersistedState'
 import { usePwaInstall } from './usePwaInstall'
 
-type Product = {
+// Texto livre nos campos (aceita "1,5" e "4,99"); convertido só no cálculo.
+type Entrada = { quantidade: string; valor: string }
+
+type Avulso = { id: string; nome: string }
+
+type Estado = {
+  entradas: Record<string, Entrada> // por id de produto
+  avulsos: Avulso[] // produtos fora do catálogo
+}
+
+type Produto = {
   id: string
   nome: string
+  categoria: string
   emoji: string
-  valor: number // preço unitário
-  quantidade: number
+  avulso: boolean
 }
+
+const ESTADO_INICIAL: Estado = { entradas: {}, avulsos: [] }
+const ENTRADA_VAZIA: Entrada = { quantidade: '', valor: '' }
+
+const PRODUTOS_CATALOGO: Produto[] = CATALOGO.map((p) => ({
+  ...p,
+  emoji: p.emoji ?? emojiParaProduto(p.nome),
+  avulso: false,
+}))
 
 const brl = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
 })
 
+function paraNumero(texto: string): number {
+  const n = Number(texto.replace(',', '.'))
+  return texto.trim() && Number.isFinite(n) && n >= 0 ? n : 0
+}
+
+function formatarQtd(n: number): string {
+  return String(Math.round(n * 1000) / 1000).replace('.', ',')
+}
+
 function App() {
-  const [produtos, setProdutos] = useState<Product[]>([])
+  const [estado, setEstado] = usePersistedState<Estado>(
+    'minha-feira:v1',
+    ESTADO_INICIAL,
+  )
+  const [busca, setBusca] = useState('')
+  const [filtro, setFiltro] = useState<'todos' | 'lista'>('todos')
   const [saindo, setSaindo] = useState<Set<string>>(new Set())
   const [confirmandoLimpar, setConfirmandoLimpar] = useState(false)
   const [mostrarPwa, setMostrarPwa] = useState(false)
 
   const pwa = usePwaInstall()
 
-  const [nome, setNome] = useState('')
-  const [valor, setValor] = useState('')
-  const [quantidade, setQuantidade] = useState('1')
+  const { entradas, avulsos } = estado
+  const entrada = (id: string) => entradas[id] ?? ENTRADA_VAZIA
 
-  const total = useMemo(
-    () => produtos.reduce((soma, p) => soma + p.valor * p.quantidade, 0),
-    [produtos],
+  const produtos = useMemo<Produto[]>(
+    () => [
+      ...PRODUTOS_CATALOGO,
+      ...avulsos.map((a) => ({
+        ...a,
+        categoria: 'Outros',
+        emoji: emojiParaProduto(a.nome),
+        avulso: true,
+      })),
+    ],
+    [avulsos],
   )
-  const qtdTotal = useMemo(
-    () => produtos.reduce((soma, p) => soma + p.quantidade, 0),
-    [produtos],
+
+  const termo = normalizar(busca)
+  const visiveis = useMemo(
+    () =>
+      produtos.filter(
+        (p) =>
+          normalizar(p.nome).includes(termo) &&
+          (filtro === 'todos' ||
+            paraNumero(entradas[p.id]?.quantidade ?? '') > 0),
+      ),
+    [produtos, entradas, termo, filtro],
   )
+
+  // Sem busca, em "Todos": agrupa por categoria. Caso contrário, lista plana.
+  const grupos = useMemo(() => {
+    if (termo || filtro === 'lista') return [{ categoria: '', itens: visiveis }]
+    const mapa = new Map<string, Produto[]>()
+    for (const p of visiveis) {
+      mapa.set(p.categoria, [...(mapa.get(p.categoria) ?? []), p])
+    }
+    return [...mapa].map(([categoria, itens]) => ({ categoria, itens }))
+  }, [visiveis, termo, filtro])
+
+  const { total, qtdProdutos } = useMemo(() => {
+    let total = 0
+    let qtdProdutos = 0
+    for (const p of produtos) {
+      const e = entradas[p.id]
+      if (!e) continue
+      const qtd = paraNumero(e.quantidade)
+      if (qtd <= 0) continue
+      total += qtd * paraNumero(e.valor)
+      qtdProdutos++
+    }
+    return { total, qtdProdutos }
+  }, [produtos, entradas])
   const totalAnimado = useAnimatedNumber(total)
 
   useEffect(() => {
@@ -78,43 +153,43 @@ function App() {
     fecharPwa()
   }
 
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    const valorNum = Number(valor.replace(',', '.'))
-    const qtdNum = Number(quantidade.replace(',', '.'))
-    if (!nome.trim() || !Number.isFinite(valorNum) || valorNum < 0) return
-    if (!Number.isFinite(qtdNum) || qtdNum <= 0) return
-
-    setProdutos((atual) => [
-      {
-        id: crypto.randomUUID(),
-        nome: nome.trim(),
-        emoji: emojiParaProduto(nome.trim()),
-        valor: valorNum,
-        quantidade: qtdNum,
-      },
+  function atualizarEntrada(id: string, mudanca: Partial<Entrada>) {
+    setEstado((atual) => ({
       ...atual,
-    ])
-    setNome('')
-    setValor('')
-    setQuantidade('1')
+      entradas: {
+        ...atual.entradas,
+        [id]: { ...(atual.entradas[id] ?? ENTRADA_VAZIA), ...mudanca },
+      },
+    }))
   }
 
   function ajustarQtd(id: string, delta: number) {
-    setProdutos((atual) =>
-      atual.map((p) =>
-        p.id === id
-          ? { ...p, quantidade: Math.max(1, p.quantidade + delta) }
-          : p,
-      ),
-    )
+    const nova = Math.max(0, paraNumero(entrada(id).quantidade) + delta)
+    atualizarEntrada(id, { quantidade: nova > 0 ? formatarQtd(nova) : '' })
   }
 
-  function removerProduto(id: string) {
+  function adicionarAvulso() {
+    const nome = busca.trim()
+    if (!nome) return
+    const id = crypto.randomUUID()
+    setEstado((atual) => ({
+      avulsos: [...atual.avulsos, { id, nome }],
+      entradas: { ...atual.entradas, [id]: { quantidade: '1', valor: '' } },
+    }))
+  }
+
+  function removerAvulso(id: string) {
     // marca para animar a saída e remove de fato após a transição
     setSaindo((s) => new Set(s).add(id))
     window.setTimeout(() => {
-      setProdutos((atual) => atual.filter((p) => p.id !== id))
+      setEstado((atual) => {
+        const entradas = { ...atual.entradas }
+        delete entradas[id]
+        return {
+          avulsos: atual.avulsos.filter((a) => a.id !== id),
+          entradas,
+        }
+      })
       setSaindo((s) => {
         const novo = new Set(s)
         novo.delete(id)
@@ -123,13 +198,19 @@ function App() {
     }, 280)
   }
 
+  // Zera as quantidades e remove os avulsos, mas guarda os valores do
+  // catálogo como memória de preço para a próxima compra.
   function limparTudo() {
     setConfirmandoLimpar(false)
-    setSaindo(new Set(produtos.map((p) => p.id)))
-    window.setTimeout(() => {
-      setProdutos([])
-      setSaindo(new Set())
-    }, 280)
+    setEstado((atual) => {
+      const ids = new Set(atual.avulsos.map((a) => a.id))
+      const entradas: Record<string, Entrada> = {}
+      for (const [id, e] of Object.entries(atual.entradas)) {
+        if (!ids.has(id) && e.valor) entradas[id] = { quantidade: '', valor: e.valor }
+      }
+      return { avulsos: [], entradas }
+    })
+    setFiltro('todos')
   }
 
   return (
@@ -141,130 +222,127 @@ function App() {
           </span>
           <div>
             <h1>Minha Feira</h1>
-            <p>Monte sua lista e acompanhe o total da compra</p>
+            <p>Escolha os produtos, informe quantidade e valor</p>
           </div>
         </div>
       </header>
 
-      <form className="formulario" onSubmit={handleSubmit}>
-        <label className="campo campo--nome">
-          <span>Produto</span>
+      <div className="busca">
+        <label className="busca__campo">
+          <span aria-hidden="true">🔍</span>
           <input
-            type="text"
-            placeholder="Ex.: Tomate"
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
+            type="search"
+            placeholder="Buscar produto..."
+            aria-label="Buscar produto"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
           />
+          {busca && (
+            <button
+              type="button"
+              className="busca__limpar"
+              aria-label="Limpar busca"
+              onClick={() => setBusca('')}
+            >
+              ✕
+            </button>
+          )}
         </label>
 
-        <label className="campo">
-          <span>Valor unitário</span>
-          <div className="campo__moeda">
-            <em>R$</em>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              placeholder="0,00"
-              value={valor}
-              onChange={(e) => setValor(e.target.value)}
-            />
-          </div>
-        </label>
-
-        <label className="campo">
-          <span>Quantidade</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            value={quantidade}
-            onChange={(e) => setQuantidade(e.target.value)}
-          />
-        </label>
-
-        <button type="submit" className="botao-criar">
-          <span aria-hidden="true">＋</span> Adicionar à lista
-        </button>
-      </form>
+        <div className="filtros" role="group" aria-label="Filtrar produtos">
+          <button
+            type="button"
+            className={`filtro${filtro === 'todos' ? ' filtro--ativo' : ''}`}
+            aria-pressed={filtro === 'todos'}
+            onClick={() => setFiltro('todos')}
+          >
+            Todos
+          </button>
+          <button
+            type="button"
+            className={`filtro${filtro === 'lista' ? ' filtro--ativo' : ''}`}
+            aria-pressed={filtro === 'lista'}
+            onClick={() => setFiltro('lista')}
+          >
+            Na minha lista ({qtdProdutos})
+          </button>
+          {qtdProdutos > 0 && (
+            <button
+              type="button"
+              className="botao-limpar"
+              onClick={() => setConfirmandoLimpar(true)}
+            >
+              🗑️ Limpar
+            </button>
+          )}
+        </div>
+      </div>
 
       <main className="lista">
-        {produtos.length === 0 ? (
-          <div className="vazio">
-            <span className="vazio__icone" aria-hidden="true">
-              🧺
-            </span>
-            <p className="vazio__titulo">Sua cesta está vazia</p>
-            <p className="vazio__dica">
-              Adicione o primeiro produto acima para começar.
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="lista__cabecalho">
-              <span className="lista__titulo">Sua lista</span>
+        {visiveis.length === 0 ? (
+          termo ? (
+            <div className="vazio">
+              <span className="vazio__icone" aria-hidden="true">
+                🔎
+              </span>
+              <p className="vazio__titulo">Nenhum produto encontrado</p>
+              <p className="vazio__dica">
+                Não achou “{busca.trim()}”? Adicione como produto avulso.
+              </p>
               <button
                 type="button"
-                className="botao-limpar"
-                onClick={() => setConfirmandoLimpar(true)}
+                className="botao-avulso"
+                onClick={adicionarAvulso}
               >
-                🗑️ Limpar tudo
+                <span aria-hidden="true">＋</span> Adicionar “{busca.trim()}”
               </button>
             </div>
-            <ul>
-              {produtos.map((p) => (
-              <li
-                key={p.id}
-                className={`item${saindo.has(p.id) ? ' item--saindo' : ''}`}
-              >
-                <span className="item__emoji" aria-hidden="true">
-                  {p.emoji}
-                </span>
-
-                <div className="item__info">
-                  <strong className="item__nome">{p.nome}</strong>
-                  <span className="item__detalhe">
-                    {brl.format(p.valor)} / un
-                  </span>
-                </div>
-
-                <div className="stepper" role="group" aria-label="Quantidade">
-                  <button
-                    type="button"
-                    onClick={() => ajustarQtd(p.id, -1)}
-                    aria-label="Diminuir"
-                    disabled={p.quantidade <= 1}
-                  >
-                    −
-                  </button>
-                  <span className="stepper__valor">{p.quantidade}</span>
-                  <button
-                    type="button"
-                    onClick={() => ajustarQtd(p.id, 1)}
-                    aria-label="Aumentar"
-                  >
-                    +
-                  </button>
-                </div>
-
-                <span className="item__subtotal">
-                  {brl.format(p.valor * p.quantidade)}
-                </span>
-
-                <button
-                  type="button"
-                  className="item__remover"
-                  aria-label={`Remover ${p.nome}`}
-                  onClick={() => removerProduto(p.id)}
-                >
-                  🗑️
-                </button>
-                </li>
-              ))}
-            </ul>
-          </>
+          ) : (
+            <div className="vazio">
+              <span className="vazio__icone" aria-hidden="true">
+                🧺
+              </span>
+              <p className="vazio__titulo">Sua cesta está vazia</p>
+              <p className="vazio__dica">
+                Toque em + em algum produto do catálogo para começar.
+              </p>
+            </div>
+          )
+        ) : (
+          grupos.map((g) => (
+            <section key={g.categoria || 'resultado'} className="categoria">
+              {g.categoria && (
+                <h2 className="lista__titulo categoria__titulo">{g.categoria}</h2>
+              )}
+              <ul>
+                {g.itens.map((p) => {
+                  const e = entrada(p.id)
+                  const qtd = paraNumero(e.quantidade)
+                  const temValor = e.valor.trim() !== ''
+                  return (
+                    <ItemProduto
+                      key={p.id}
+                      nome={p.nome}
+                      emoji={p.emoji}
+                      quantidade={e.quantidade}
+                      valor={e.valor}
+                      subtotal={
+                        qtd > 0 && temValor ? qtd * paraNumero(e.valor) : null
+                      }
+                      ativo={qtd > 0}
+                      saindo={saindo.has(p.id)}
+                      onAjustar={(delta) => ajustarQtd(p.id, delta)}
+                      onQuantidade={(quantidade) =>
+                        atualizarEntrada(p.id, { quantidade })
+                      }
+                      onValor={(valor) => atualizarEntrada(p.id, { valor })}
+                      onRemover={p.avulso ? () => removerAvulso(p.id) : undefined}
+                    />
+                  )
+                })}
+              </ul>
+            </section>
+          ))
         )}
       </main>
 
@@ -272,7 +350,7 @@ function App() {
         <div className="total__info">
           <span className="total__rotulo">Total da compra</span>
           <span className="total__itens">
-            {qtdTotal} {qtdTotal === 1 ? 'item' : 'itens'}
+            {qtdProdutos} {qtdProdutos === 1 ? 'produto' : 'produtos'}
           </span>
         </div>
         <strong className="total__valor">{brl.format(totalAnimado)}</strong>
@@ -298,9 +376,9 @@ function App() {
               Limpar a lista?
             </h2>
             <p className="modal__texto">
-              Isso vai remover {produtos.length}{' '}
-              {produtos.length === 1 ? 'produto' : 'produtos'} da sua lista. Essa
-              ação não pode ser desfeita.
+              Isso vai zerar as quantidades de {qtdProdutos}{' '}
+              {qtdProdutos === 1 ? 'produto' : 'produtos'} e remover os itens
+              avulsos. Os valores do catálogo ficam salvos para a próxima compra.
             </p>
             <div className="modal__acoes">
               <button

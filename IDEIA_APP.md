@@ -14,7 +14,7 @@ unitário e quantidade) e acompanha em tempo real o **total da compra**. Foco em
 - **Plataforma:** Web + **PWA** (instalável no celular via "Adicionar à tela inicial",
   sem loja e sem custo). Funciona em Android e iOS pelo navegador.
 - **Por que PWA:** não há contas de desenvolvedor Android/iOS; PWA elimina lojas e taxas.
-- **Persistência atual:** nenhuma — estado só em memória (some ao recarregar).
+- **Persistência atual:** `localStorage` (chave `minha-feira:v1`) — quantidades, valores e avulsos.
 
 ---
 
@@ -34,7 +34,11 @@ Sem backend, sem banco, sem libs extras de UI/estado. Tudo client-side.
 
 ## 3. Estado atual (o que já está implementado)
 
-- ✅ Tela única com formulário (produto, valor unitário, quantidade) e botão **"Adicionar à lista"**.
+- ✅ **Catálogo fixo** de ~75 produtos por categoria (`src/catalogo.ts`) como tela principal:
+  cada card tem stepper/campo de quantidade e campo de valor unitário.
+- ✅ **Busca** por nome (ignora acentos) + filtros **Todos / Na minha lista (n)**.
+- ✅ Produto fora do catálogo: quando a busca não acha, botão **"Adicionar “termo”"** cria item avulso.
+- ✅ **"Limpar"** zera quantidades e remove avulsos, mas mantém os valores (memória de preço).
 - ✅ Lista de produtos em **cards**, cada um com:
   - **Emoji automático** conforme o nome (`src/emoji.ts`, ~50 itens mapeados, fallback 🛍️).
   - **Stepper +/−** para ajustar quantidade na hora.
@@ -111,7 +115,7 @@ Ordem recomendada para o estágio atual (priorizar uso/retenção antes de cobra
 
 ## 7. Próximos passos candidatos (backlog)
 
-- [ ] **Persistência local** (`localStorage`) — lista sobrevive ao recarregar.
+- [x] **Persistência local** (`localStorage`) — lista sobrevive ao recarregar.
 - [ ] **Múltiplas listas** (criar/renomear/trocar entre listas).
 - [ ] **Editar** um produto já cadastrado.
 - [ ] **Compartilhar lista** (texto/WhatsApp ou link).
